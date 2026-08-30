@@ -9,7 +9,7 @@ const geistSans = Geist({
 })
 
 export const metadata: Metadata = {
-  title: 'SkillGap AI — Dashboard',
+  title: 'SkillPath AI — Dashboard',
   description:
     'Bridge your skills gap and achieve your dream role with AI-powered roadmaps, assessments, and personalized recommendations.',
   generator: 'v0.app',

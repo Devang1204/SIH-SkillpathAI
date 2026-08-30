@@ -1,3 +1,7 @@
+"use client"
+
+import Link from "next/link"
+
 interface RoadmapPhase {
   title: string
   duration: string
@@ -59,14 +63,14 @@ export function RoadmapProgress({
 
   const totalStages = roadmap.phases.length
 
-  // Since newly generated roadmap steps are not completed yet,
-  // the first stage is treated as the current stage.
   const currentStage = 1
+
   const progressPercentage = Math.round(
     ((currentStage - 1) / totalStages) * 100
   )
 
-  const currentPhase = roadmap.phases[currentStage - 1]
+  const currentPhase =
+    roadmap.phases[currentStage - 1]
 
   return (
     <section className="rounded-2xl border border-border bg-card p-6">
@@ -75,20 +79,26 @@ export function RoadmapProgress({
           Learning Roadmap Progress
         </h3>
 
-        <button className="text-sm font-medium text-primary hover:underline">
+        <Link
+          href="/roadmap"
+          className="text-sm font-medium text-primary hover:underline"
+        >
           View Roadmap
-        </button>
+        </Link>
       </div>
 
       <p className="mt-4 text-sm font-medium text-foreground">
-        Stage {currentStage} of {totalStages}: {currentPhase.title}
+        Stage {currentStage} of {totalStages}:{" "}
+        {currentPhase.title}
       </p>
 
       <div className="mt-3 flex items-center gap-3">
         <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-secondary">
           <div
             className="h-full rounded-full bg-primary transition-all"
-            style={{ width: `${progressPercentage}%` }}
+            style={{
+              width: `${progressPercentage}%`,
+            }}
           />
         </div>
 

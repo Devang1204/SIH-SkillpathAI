@@ -1,16 +1,32 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { Sidebar } from "@/components/sidebar"
-import { DashboardHeader } from "@/components/dashboard-header"
-import { WelcomeRow } from "@/components/welcome-row"
-import { StatCards } from "@/components/stat-cards"
-import { SkillGapOverview } from "@/components/skill-gap-overview"
-import { RecommendedSkills } from "@/components/recommended-skills"
-import { RoadmapProgress } from "@/components/roadmap-progress"
-import { AiRecommendation } from "@/components/ai-recommendation"
-import { Strengths } from "@/components/strengths"
-import { RecentActivity } from "@/components/recent-activity"
+import { useEffect, useRef, useState } from "react"
+import {
+  CheckCircle2,
+  FileText,
+  Loader2,
+  Sparkles,
+  Target,
+  UploadCloud,
+} from "lucide-react"
+import { useRouter } from "next/navigation"
+
+type ResumeResult = {
+  filename?: string
+  student_id?: string
+  ai_result?: {
+    status?: string
+    name?: string
+    email?: string
+    career_goal?: string
+    skills?: Array<{
+      name?: string
+      level?: string
+    }>
+  }
+  supabase_status?: string
+  supabase_error?: string
+}
 
 type SkillMatch = {
   student_id: string
@@ -22,215 +38,586 @@ type SkillMatch = {
   match_percentage: number
 }
 
-type Student = {
-  student_id: string
-  name: string | null
-}
+export default function LandingPage() {
+  const router = useRouter()
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
-type RoadmapPhase = {
-  title: string
-  duration: string
-  skills: string[]
-  topics: string[]
-  project: string
-}
+  const [roles, setRoles] = useState<string[]>([])
+  const [selectedRole, setSelectedRole] = useState("")
 
-type Roadmap = {
-  status: string
-  role: string
-  phases: RoadmapPhase[]
-}
+  const [fileName, setFileName] = useState("")
+  const [studentId, setStudentId] = useState("")
 
-type RoadmapResponse = {
-  status: string
-  student_id: string
-  target_role: string
-  roadmap_id?: string
-  matched_skills: string[]
-  missing_skills: string[]
-  roadmap: Roadmap
-}
+  const [resumeData, setResumeData] = useState<
+    ResumeResult["ai_result"] | null
+  >(null)
 
-export default function Page() {
-  const [skillMatch, setSkillMatch] = useState<SkillMatch | null>(null)
-  const [student, setStudent] = useState<Student | null>(null)
-  const [roadmap, setRoadmap] = useState<Roadmap | null>(null)
+  const [uploadLoading, setUploadLoading] = useState(false)
+  const [matchLoading, setMatchLoading] = useState(false)
 
-  const [isLoading, setIsLoading] = useState(true)
-  const [isRoadmapLoading, setIsRoadmapLoading] = useState(false)
+  const [error, setError] = useState("")
 
+  /*
+   * Load available career roles from backend
+   */
   useEffect(() => {
-    const stored = localStorage.getItem("skillMatch")
-
-    if (stored) {
-      try {
-        setSkillMatch(JSON.parse(stored))
-      } catch (e) {
-        console.error("Failed to parse skillMatch from localStorage", e)
-      }
-    }
-
-    setIsLoading(false)
-  }, [])
-
-  // Fetch actual student information from the backend.
-  useEffect(() => {
-    if (!skillMatch?.student_id) {
-      return
-    }
-
-    const fetchStudent = async () => {
+    async function loadRoles() {
       try {
         const response = await fetch(
-          `http://127.0.0.1:8002/student/${skillMatch.student_id}`
+          "http://127.0.0.1:8002/roles"
         )
 
         if (!response.ok) {
-          throw new Error(
-            `Student API failed with status ${response.status}`
-          )
+          throw new Error("Could not load career roles.")
         }
 
-        const data: Student = await response.json()
+        const data = await response.json()
 
-        setStudent(data)
-      } catch (error) {
-        console.error("Failed to fetch student:", error)
+        if (Array.isArray(data.roles)) {
+          setRoles(data.roles)
+
+          if (data.roles.length > 0) {
+            setSelectedRole(data.roles[0])
+          }
+        }
+      } catch (err) {
+        console.error("Failed to load roles:", err)
+
+        setError(
+          "Could not load career roles. Make sure the backend is running."
+        )
       }
     }
 
-    fetchStudent()
-  }, [skillMatch])
+    loadRoles()
+  }, [])
 
-  // Generate the personalized roadmap.
-  useEffect(() => {
-    if (!skillMatch) {
+  /*
+   * Upload resume
+   */
+  async function handleFile(file: File) {
+    if (!file) return
+
+    setError("")
+    setFileName(file.name)
+    setResumeData(null)
+    setStudentId("")
+    setUploadLoading(true)
+
+    /*
+     * Clear previous user's data
+     */
+    localStorage.removeItem("skillMatch")
+    localStorage.removeItem("studentId")
+    localStorage.removeItem("targetRole")
+    localStorage.removeItem("resumeData")
+
+    try {
+      if (!file.name.toLowerCase().endsWith(".pdf")) {
+        throw new Error("Please upload a PDF resume.")
+      }
+
+      const formData = new FormData()
+      formData.append("file", file)
+
+      const response = await fetch(
+        "http://127.0.0.1:8002/resume/upload",
+        {
+          method: "POST",
+          body: formData,
+        }
+      )
+
+      const result: ResumeResult = await response.json()
+
+      if (!response.ok) {
+        throw new Error(
+          typeof result === "object" &&
+          result &&
+          "detail" in result
+            ? String(
+                (result as unknown as { detail: string }).detail
+              )
+            : `Resume upload failed with status ${response.status}`
+        )
+      }
+
+      if (!result.student_id) {
+        throw new Error(
+          result.ai_result?.status === "ai_failed"
+            ? "AI resume analysis failed. Please check the backend/API key."
+            : "Resume was processed, but no student ID was returned."
+        )
+      }
+
+      setStudentId(result.student_id)
+
+      setResumeData(result.ai_result ?? null)
+
+      /*
+       * Save extracted resume information
+       */
+      localStorage.setItem(
+        "studentId",
+        result.student_id
+      )
+
+      if (result.ai_result) {
+        localStorage.setItem(
+          "resumeData",
+          JSON.stringify(result.ai_result)
+        )
+      }
+
+      /*
+       * If AI extracted a career goal and it matches
+       * one of the backend roles, automatically select it.
+       */
+      const extractedRole =
+        result.ai_result?.career_goal
+
+      if (
+        extractedRole &&
+        roles.some(
+          (role) =>
+            role.toLowerCase() ===
+            extractedRole.toLowerCase()
+        )
+      ) {
+        const matchingRole = roles.find(
+          (role) =>
+            role.toLowerCase() ===
+            extractedRole.toLowerCase()
+        )
+
+        if (matchingRole) {
+          setSelectedRole(matchingRole)
+        }
+      }
+    } catch (err) {
+      console.error("Resume upload failed:", err)
+
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to upload your resume."
+      )
+
+      setFileName("")
+      setStudentId("")
+      setResumeData(null)
+    } finally {
+      setUploadLoading(false)
+    }
+  }
+
+  /*
+   * File picker
+   */
+  function handleFileChange(
+    event: React.ChangeEvent<HTMLInputElement>
+  ) {
+    const file = event.target.files?.[0]
+
+    if (file) {
+      handleFile(file)
+    }
+  }
+
+  /*
+   * Drag & drop
+   */
+  function handleDrop(
+    event: React.DragEvent<HTMLDivElement>
+  ) {
+    event.preventDefault()
+
+    const file = event.dataTransfer.files?.[0]
+
+    if (file) {
+      handleFile(file)
+    }
+  }
+
+  /*
+   * Skill matching
+   */
+  async function handleAnalyze() {
+    if (!studentId) {
+      setError("Please upload your resume first.")
       return
     }
 
-    const generateRoadmap = async () => {
-      setIsRoadmapLoading(true)
+    if (!selectedRole) {
+      setError("Please select a target career role.")
+      return
+    }
 
-      try {
-        const response = await fetch("http://127.0.0.1:8002/roadmap", {
+    setError("")
+    setMatchLoading(true)
+
+    try {
+      const response = await fetch(
+        "http://127.0.0.1:8002/skill-match",
+        {
           method: "POST",
           headers: {
-            Accept: "application/json",
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            student_id: skillMatch.student_id,
-            target_role: skillMatch.target_role,
+            student_id: studentId,
+            target_role: selectedRole,
           }),
-        })
-
-        if (!response.ok) {
-          throw new Error(
-            `Roadmap API failed with status ${response.status}`
-          )
         }
+      )
 
-        const data: RoadmapResponse = await response.json()
+      const result: SkillMatch = await response.json()
 
-        if (data.roadmap?.status === "ok") {
-          setRoadmap(data.roadmap)
-        } else {
-          console.error("Roadmap generation failed:", data.roadmap)
-        }
-      } catch (error) {
-        console.error("Failed to generate roadmap:", error)
-      } finally {
-        setIsRoadmapLoading(false)
+      if (!response.ok) {
+        throw new Error(
+          `Skill matching failed with status ${response.status}`
+        )
       }
+
+      /*
+       * Save the complete skill-match result.
+       * Dashboard reads this data.
+       */
+      localStorage.setItem(
+        "skillMatch",
+        JSON.stringify(result)
+      )
+
+      localStorage.setItem(
+        "studentId",
+        studentId
+      )
+
+      localStorage.setItem(
+        "targetRole",
+        selectedRole
+      )
+
+      /*
+       * Go directly to Dashboard.
+       *
+       * NO /input page.
+       */
+      router.push("/dashboard")
+    } catch (err) {
+      console.error("Skill matching failed:", err)
+
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to analyze your skills."
+      )
+    } finally {
+      setMatchLoading(false)
     }
-
-    generateRoadmap()
-  }, [skillMatch])
-
-  if (isLoading) {
-    return (
-      <div className="flex min-h-screen bg-background">
-        <div className="sticky top-0 hidden h-screen lg:block">
-          <Sidebar />
-        </div>
-
-        <main className="flex-1 overflow-x-hidden px-5 py-6 md:px-8">
-          <DashboardHeader />
-
-          <div className="mt-6 text-muted-foreground">
-            Loading...
-          </div>
-        </main>
-      </div>
-    )
   }
 
   return (
-    <div className="flex min-h-screen bg-background">
-      <div className="sticky top-0 hidden h-screen lg:block">
-        <Sidebar />
-      </div>
+    <main className="min-h-screen bg-background">
 
-      <main className="flex-1 overflow-x-hidden px-5 py-6 md:px-8">
-        <DashboardHeader />
+      {/* Header */}
+      <header className="border-b border-border">
+        <div className="mx-auto flex max-w-6xl items-center px-6 py-5">
 
-        {!skillMatch ? (
-          <div className="mt-6 rounded-2xl border border-border bg-card p-12 text-center">
-            <p className="text-lg font-semibold text-foreground">
-              Upload your resume to get started
-            </p>
+          <div className="flex items-center gap-3">
 
-            <p className="mt-2 text-sm text-muted-foreground">
-              Go to the Profile section and upload your resume to analyze your
-              skills.
-            </p>
+            <div className="flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <Sparkles className="size-5" />
+            </div>
+
+            <div>
+              <h1 className="text-lg font-bold text-foreground">
+                SkillPath AI
+              </h1>
+
+              <p className="text-xs text-muted-foreground">
+                Personalized career intelligence
+              </p>
+            </div>
+
           </div>
-        ) : (
-          <div className="mt-6 flex flex-col gap-5">
-            <WelcomeRow
-              studentName={student?.name || "Student"}
-              targetRole={skillMatch.target_role}
-            />
 
-            <StatCards
-              matchPercentage={skillMatch.match_percentage}
-              matchedSkillsCount={skillMatch.matched_skills.length}
-              missingSkillsCount={skillMatch.missing_skills.length}
-            />
+        </div>
+      </header>
 
-            <div className="grid gap-5 xl:grid-cols-3">
-              <div className="flex flex-col gap-5 xl:col-span-2">
-                <SkillGapOverview
-                  targetRole={skillMatch.target_role}
-                  missingSkillsCount={skillMatch.missing_skills.length}
-                  matchedSkillsCount={skillMatch.matched_skills.length}
-                />
+      {/* Main */}
+      <section className="px-6 py-14 md:py-20">
 
-                <div className="grid gap-5 md:grid-cols-2">
-                  <Strengths
-                    matchedSkills={skillMatch.matched_skills}
-                  />
+        <div className="mx-auto max-w-5xl text-center">
 
-                  <RecentActivity />
+          {/* Hero icon */}
+          <div className="mx-auto flex size-16 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+            <Sparkles className="size-8" />
+          </div>
+
+          <p className="mt-6 text-sm font-semibold uppercase tracking-[0.2em] text-primary">
+            AI-powered career guidance
+          </p>
+
+          <h2 className="mx-auto mt-4 max-w-4xl text-4xl font-bold tracking-tight text-foreground md:text-6xl">
+            Turn your resume into a
+            <span className="text-primary">
+              {" "}personalized career roadmap.
+            </span>
+          </h2>
+
+          <p className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-muted-foreground md:text-lg">
+            Upload your resume, choose your target career,
+            and discover the skills you need to reach your goal.
+          </p>
+
+          {/* Upload + analysis card */}
+          <div className="mx-auto mt-10 max-w-2xl">
+
+            <div
+              onDragOver={(event) => {
+                event.preventDefault()
+              }}
+              onDrop={handleDrop}
+              className="rounded-3xl border border-border bg-card p-8 md:p-10"
+            >
+
+              {/* Upload state */}
+              {!studentId ? (
+                <>
+                  {uploadLoading ? (
+                    <div className="flex flex-col items-center py-8">
+
+                      <div className="flex size-16 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                        <Loader2 className="size-8 animate-spin" />
+                      </div>
+
+                      <h3 className="mt-5 text-xl font-bold text-foreground">
+                        Analyzing your resume
+                      </h3>
+
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        Extracting your skills and profile...
+                      </p>
+
+                      <p className="mt-3 text-xs text-muted-foreground">
+                        {fileName}
+                      </p>
+
+                    </div>
+                  ) : (
+                    <>
+                      <div className="mx-auto flex size-16 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                        <UploadCloud className="size-8" />
+                      </div>
+
+                      <h3 className="mt-5 text-xl font-bold text-foreground">
+                        Start with your resume
+                      </h3>
+
+                      <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                        Drag and drop your resume here
+                        <br />
+                        or choose a file from your computer.
+                      </p>
+
+                      <p className="mt-3 text-xs text-muted-foreground">
+                        PDF format supported
+                      </p>
+
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".pdf"
+                        className="hidden"
+                        onChange={handleFileChange}
+                      />
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          fileInputRef.current?.click()
+                        }
+                        className="mt-7 inline-flex items-center gap-2 rounded-xl bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
+                      >
+                        <FileText className="size-4" />
+                        Upload Resume
+                      </button>
+                    </>
+                  )}
+                </>
+              ) : (
+                <>
+                  {/* Uploaded successfully */}
+                  <div className="flex flex-col items-center">
+
+                    <div className="flex size-16 items-center justify-center rounded-full bg-primary/10 text-primary">
+                      <CheckCircle2 className="size-8" />
+                    </div>
+
+                    <h3 className="mt-5 text-xl font-bold text-foreground">
+                      Resume analyzed
+                    </h3>
+
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      {fileName}
+                    </p>
+
+                    {resumeData?.name && (
+                      <p className="mt-4 text-sm font-semibold text-foreground">
+                        Welcome, {resumeData.name}
+                      </p>
+                    )}
+
+                  </div>
+
+                  {/* Target role */}
+                  <div className="mt-8 text-left">
+
+                    <div className="mb-3 flex items-center gap-2">
+                      <Target className="size-4 text-primary" />
+
+                      <label className="text-sm font-semibold text-foreground">
+                        What career are you targeting?
+                      </label>
+                    </div>
+
+                    <select
+                      value={selectedRole}
+                      onChange={(event) =>
+                        setSelectedRole(event.target.value)
+                      }
+                      className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm text-foreground outline-none focus:border-primary"
+                    >
+                      {roles.length === 0 ? (
+                        <option value="">
+                          Loading roles...
+                        </option>
+                      ) : (
+                        roles.map((role) => (
+                          <option
+                            key={role}
+                            value={role}
+                          >
+                            {role}
+                          </option>
+                        ))
+                      )}
+                    </select>
+
+                  </div>
+
+                  {/* Analyze button */}
+                  <button
+                    type="button"
+                    disabled={
+                      matchLoading ||
+                      !studentId ||
+                      !selectedRole
+                    }
+                    onClick={handleAnalyze}
+                    className="mt-7 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {matchLoading ? (
+                      <>
+                        <Loader2 className="size-4 animate-spin" />
+                        Analyzing your skills...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="size-4" />
+                        Analyze My Skills
+                      </>
+                    )}
+                  </button>
+
+                  {/* Change resume */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStudentId("")
+                      setResumeData(null)
+                      setFileName("")
+                      setError("")
+
+                      localStorage.removeItem("skillMatch")
+                      localStorage.removeItem("studentId")
+                      localStorage.removeItem("targetRole")
+                      localStorage.removeItem("resumeData")
+
+                      if (fileInputRef.current) {
+                        fileInputRef.current.value = ""
+                      }
+                    }}
+                    className="mt-3 text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                  >
+                    Upload a different resume
+                  </button>
+                </>
+              )}
+
+              {/* Error */}
+              {error && (
+                <div className="mt-6 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-left text-sm text-red-400">
+                  {error}
                 </div>
-              </div>
+              )}
 
-              <div className="flex flex-col gap-5">
-                <RecommendedSkills
-                  missingSkills={skillMatch.missing_skills}
-                />
-
-                <RoadmapProgress
-                  roadmap={roadmap}
-                  isLoading={isRoadmapLoading}
-                />
-
-                <AiRecommendation />
-              </div>
             </div>
           </div>
-        )}
-      </main>
-    </div>
+
+          {/* How it works */}
+          <div className="mx-auto mt-14 grid max-w-4xl gap-4 text-left md:grid-cols-3">
+
+            <div className="rounded-2xl border border-border bg-card p-5">
+              <p className="text-sm font-bold text-primary">
+                01 · Upload
+              </p>
+
+              <h3 className="mt-2 font-semibold text-foreground">
+                Understand your profile
+              </h3>
+
+              <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                AI extracts your experience, education, and
+                existing skills from your resume.
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-border bg-card p-5">
+              <p className="text-sm font-bold text-primary">
+                02 · Analyze
+              </p>
+
+              <h3 className="mt-2 font-semibold text-foreground">
+                Find your skill gaps
+              </h3>
+
+              <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                Compare your current skills with the requirements
+                of your chosen career.
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-border bg-card p-5">
+              <p className="text-sm font-bold text-primary">
+                03 · Grow
+              </p>
+
+              <h3 className="mt-2 font-semibold text-foreground">
+                Follow your roadmap
+              </h3>
+
+              <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                Get a personalized path to close your skill gaps
+                and move toward your target role.
+              </p>
+            </div>
+
+          </div>
+
+        </div>
+      </section>
+    </main>
   )
 }

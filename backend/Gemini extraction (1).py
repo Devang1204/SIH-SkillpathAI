@@ -65,7 +65,7 @@ def extract_resume_data(resume_text: str) -> dict[str, Any]:
     prompt = build_resume_prompt(resume_text)
 
     response = client.models.generate_content(
-        model="gemini-3.6-flash",
+        model="gemini-3.5-flash-lite",
         contents=prompt,
     )
 
