@@ -2,6 +2,7 @@ import json
 import os
 import uuid
 from typing import Any
+import uuid
 
 import fitz
 from dotenv import load_dotenv
@@ -481,38 +482,8 @@ def db_health_check():
 # 13. GET ALL STUDENTS
 # =========================
 
-@app.get("/student/{student_id}")
-def get_student(student_id: str):
-
-    if not supabase:
-        raise HTTPException(
-            status_code=503,
-            detail="Supabase is not configured."
-        )
-
-    try:
-        response = (
-            supabase
-            .table("student")
-            .select("student_id, name")
-            .eq("student_id", student_id)
-            .limit(1)
-            .execute()
-        )
-
-    except Exception as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to fetch student: {str(exc)}",
-        ) from exc
-
-    if not response.data:
-        raise HTTPException(
-            status_code=404,
-            detail="Student not found."
-        )
-
-    return response.data[0]
+@app.get("/students")
+def get_students():
 
     if not supabase:
 
@@ -813,7 +784,7 @@ def skill_match(
         "match_percentage": match_percentage,
     }
 # =========================
-# 18. ROADMAP GENERATION + DATABASE STORAGE
+# 18. ROADMAP GENERATION
 # =========================
 
 @app.post("/roadmap")
@@ -841,7 +812,6 @@ def create_roadmap(
             ),
         )
 
-    # Get student's existing skills.
     try:
         skills_response = (
             supabase
@@ -861,10 +831,10 @@ def create_roadmap(
     if skills_response.data:
         for row in skills_response.data:
             skill = row.get("skill")
+
             if skill:
                 student_skills.append(skill.strip())
 
-    # Calculate the skill gap using the existing role_skills.json.
     required_skills = roles[request.target_role]
 
     student_skills_normalized = {
@@ -881,214 +851,22 @@ def create_roadmap(
         else:
             missing_skills.append(required_skill)
 
-    # Generate the roadmap with Gemini 3.6 Flash.
     roadmap = generate_roadmap_with_ai(
         target_role=request.target_role,
         matched_skills=matched_skills,
         missing_skills=missing_skills,
     )
 
-    if roadmap.get("status") != "ok":
-        return {
-            "student_id": request.student_id,
-            "target_role": request.target_role,
-            "matched_skills": matched_skills,
-            "missing_skills": missing_skills,
-            "roadmap": roadmap,
-        }
-
-    # Find the career role ID dynamically.
-    # If the selected role is not yet in the database,
-    # create it using the role supplied in the request.
-    try:
-        role_response = (
-            supabase
-            .table("career_roles")
-            .select("id")
-            .eq("role_name", request.target_role)
-            .limit(1)
-            .execute()
-        )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to find career role: {str(exc)}",
-        ) from exc
-
-    if role_response.data:
-        career_role_id = role_response.data[0]["id"]
-    else:
-        career_role_id = str(uuid.uuid4())
-
-        try:
-            (
-                supabase
-                .table("career_roles")
-                .insert({
-                    "id": career_role_id,
-                    "role_name": request.target_role,
-                    "description": None,
-                })
-                .execute()
-            )
-        except Exception as exc:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to create career role: {str(exc)}",
-            ) from exc
-
-    # Create the parent roadmap record.
-    roadmap_id = str(uuid.uuid4())
-
-    try:
-        (
-            supabase
-            .table("roadmaps")
-            .insert({
-                "id": roadmap_id,
-                "user_id": request.student_id,
-                "career_role_id": career_role_id,
-            })
-            .execute()
-        )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to save roadmap: {str(exc)}",
-        ) from exc
-
-    # Convert Gemini phases into roadmap_steps.
-    phases = roadmap.get("phases", [])
-    roadmap_steps = []
-
-    for index, phase in enumerate(phases, start=1):
-        title = phase.get(
-            "title",
-            f"Learning Phase {index}"
-        )
-
-        duration = phase.get("duration", "")
-        phase_skills = phase.get("skills", [])
-        topics = phase.get("topics", [])
-        project = phase.get("project", "")
-
-        description_parts = []
-
-        if topics:
-            description_parts.append(
-                "Topics: " + ", ".join(
-                    str(topic)
-                    for topic in topics
-                )
-            )
-
-        if project:
-            description_parts.append(
-                "Project: " + str(project)
-            )
-
-        description = "\n".join(description_parts)
-
-        # Use the student's existing skill row when Gemini
-        # mentions a skill the student already has.
-        skill_id = None
-
-        if phase_skills:
-            phase_skill_names = {
-                str(skill).strip().lower()
-                for skill in phase_skills
-                if str(skill).strip()
-            }
-
-            for student_skill_row in (
-                skills_response.data or []
-            ):
-                existing_skill = student_skill_row.get("skill")
-
-                if (
-                    existing_skill
-                    and existing_skill.strip().lower()
-                    in phase_skill_names
-                ):
-                    skill_lookup_response = (
-                        supabase
-                        .table("skills")
-                        .select("id")
-                        .eq(
-                            "student_id",
-                            request.student_id
-                        )
-                        .eq(
-                            "skill",
-                            existing_skill
-                        )
-                        .limit(1)
-                        .execute()
-                    )
-
-                    if skill_lookup_response.data:
-                        skill_id = (
-                            skill_lookup_response.data[0]["id"]
-                        )
-
-                    break
-
-        roadmap_steps.append({
-            "id": str(uuid.uuid4()),
-            "roadmap_id": roadmap_id,
-            "skill_id": skill_id,
-            "step_number": str(index),
-            "title": title,
-            "description": description,
-            "estimated_duration": str(duration),
-            "status": "not_started",
-        })
-
-    # Save all generated phases as roadmap steps.
-    if roadmap_steps:
-        try:
-            (
-                supabase
-                .table("roadmap_steps")
-                .insert(roadmap_steps)
-                .execute()
-            )
-        except Exception as exc:
-            # Remove the parent roadmap if its steps could not be saved.
-            try:
-                (
-                    supabase
-                    .table("roadmaps")
-                    .delete()
-                    .eq("id", roadmap_id)
-                    .execute()
-                )
-            except Exception:
-                pass
-
-            raise HTTPException(
-                status_code=500,
-                detail=(
-                    f"Failed to save roadmap steps: {str(exc)}"
-                ),
-            ) from exc
-
     return {
-        "status": "ok",
         "student_id": request.student_id,
         "target_role": request.target_role,
-        "roadmap_id": roadmap_id,
         "matched_skills": matched_skills,
         "missing_skills": missing_skills,
         "roadmap": roadmap,
-        "database": {
-            "roadmap_saved": True,
-            "steps_saved": len(roadmap_steps),
-        },
     }
 
 # =========================
-# 19. LOCAL DEVELOPMENT
+# 17. LOCAL DEVELOPMENT
 # =========================
 
 if __name__ == "__main__":
