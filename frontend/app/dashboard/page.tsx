@@ -12,6 +12,9 @@ import { AiRecommendation } from "@/components/ai-recommendation"
 import { Strengths } from "@/components/strengths"
 import { RecentActivity } from "@/components/recent-activity"
 
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8002"
+
 type SkillMatch = {
   student_id: string
   target_role: string
@@ -82,7 +85,7 @@ export default function Page() {
     const fetchStudent = async () => {
       try {
         const response = await fetch(
-          `http://127.0.0.1:8002/student/${skillMatch.student_id}`
+          `${API_URL}/student/${skillMatch.student_id}`
         )
 
         if (!response.ok) {
@@ -112,7 +115,7 @@ export default function Page() {
       setIsRoadmapLoading(true)
 
       try {
-        const response = await fetch("http://127.0.0.1:8002/roadmap", {
+        const response = await fetch(`${API_URL}/roadmap`, {
           method: "POST",
           headers: {
             Accept: "application/json",

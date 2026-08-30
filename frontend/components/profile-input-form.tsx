@@ -16,6 +16,9 @@ import {
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8002"
+
 type ExtractedResume = {
   status?: string
   name?: string
@@ -192,7 +195,7 @@ export function ProfileInputForm() {
       formData.append("file", file)
 
       const response = await fetch(
-        "http://127.0.0.1:8002/resume/upload",
+        `${API_URL}/resume/upload`,
         {
           method: "POST",
           body: formData,
@@ -311,7 +314,7 @@ export function ProfileInputForm() {
 
     try {
       const response = await fetch(
-        "http://127.0.0.1:8002/skill-match",
+        `${API_URL}/skill-match`,
         {
           method: "POST",
           headers: {

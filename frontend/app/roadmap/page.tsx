@@ -15,6 +15,9 @@ import {
 import { Sidebar } from "@/components/sidebar"
 import { DashboardHeader } from "@/components/dashboard-header"
 
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8002"
+
 interface RoadmapPhase {
   title: string
   duration: string
@@ -95,7 +98,7 @@ export default function RoadmapPage() {
         }
 
         const response = await fetch(
-          "http://127.0.0.1:8002/roadmap",
+          `${API_URL}/roadmap`,
           {
             method: "POST",
             headers: {
