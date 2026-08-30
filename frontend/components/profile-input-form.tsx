@@ -26,6 +26,7 @@ type Project = {
 }
 
 type ExtractedResume = {
+  status?: string
   name?: string
   email?: string
   education?: string
@@ -41,15 +42,8 @@ const roles = [
   "Data Scientist",
   "Machine Learning Engineer",
   "Data Analyst",
-  "Frontend Developer",
-  "Backend Developer",
-  "Full-Stack Developer",
-  "Product Manager",
-  "UX Designer",
-  "DevOps Engineer",
-  "Cloud Architect",
+  "Web Developer",
 ]
-
 const suggestedSkills = ["Python", "SQL", "Excel", "Pandas", "TensorFlow", "Tableau", "Statistics"]
 
 const knowledgeQuestions = [
@@ -127,6 +121,10 @@ export function ProfileInputForm() {
   const [targetRole, setTargetRole] = useState("Data Scientist")
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [submitted, setSubmitted] = useState(false)
+  const [studentId, setStudentId] = useState<string | null>(null)
+  const [skillMatch, setSkillMatch] = useState<any>(null)
+  const [matchLoading, setMatchLoading] = useState(false)
+  const [matchError, setMatchError] = useState<string | null>(null)
 
   async function handleFiles(files: FileList | null) {
     if (!files || files.length === 0) return
@@ -152,6 +150,9 @@ export function ProfileInputForm() {
 
       const result = await response.json()
       setExtractedData(result.ai_result)
+      if (result.student_id) {
+        setStudentId(result.student_id)
+      }
 
       // Populate form fields with extracted data
       if (result.ai_result?.skills && Array.isArray(result.ai_result.skills)) {
@@ -162,9 +163,7 @@ export function ProfileInputForm() {
           ...new Set([...prev, ...extractedSkills].map((s) => s.toLowerCase())),
         ].map((s) => s.charAt(0).toUpperCase() + s.slice(1)))
       }
-      if (result.ai_result?.career_goal) {
-        setTargetRole(result.ai_result.career_goal)
-      }
+
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to upload resume"
       setUploadError(message)
@@ -203,11 +202,53 @@ export function ProfileInputForm() {
     setProjects((prev) => (prev.length > 1 ? prev.filter((p) => p.id !== id) : prev))
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    setSubmitted(true)
-    if (typeof window !== "undefined") {
-      window.scrollTo({ top: 0, behavior: "smooth" })
+
+    if (!studentId) {
+      setMatchError("Please upload your resume first.")
+      return
+    }
+
+    setMatchLoading(true)
+    setMatchError(null)
+
+    try {
+      const response = await fetch("http://127.0.0.1:8002/skill-match", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          student_id: studentId,
+          target_role: targetRole,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error(`Skill matching failed: ${response.statusText}`)
+      }
+
+      const result = await response.json()
+
+      setSkillMatch(result)
+
+      localStorage.setItem("skillMatch", JSON.stringify(result))
+      localStorage.setItem("targetRole", targetRole)
+
+      setSubmitted(true)
+      if (typeof window !== "undefined") {
+        window.scrollTo({ top: 0, behavior: "smooth" })
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to analyze your skills."
+
+      setMatchError(message)
+    } finally {
+      setMatchLoading(false)
     }
   }
 
